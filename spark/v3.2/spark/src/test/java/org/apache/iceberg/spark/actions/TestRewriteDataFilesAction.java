@@ -235,6 +235,52 @@ public class TestRewriteDataFilesAction extends SparkTestBase {
   }
 
   @Test
+  public void testBinPackWithDeleteAllData() throws Exception {
+    Table table = createTablePartitioned(1, 1);
+    table.updateProperties().set(TableProperties.FORMAT_VERSION, "2").commit();
+    shouldHaveFiles(table, 1);
+    table.refresh();
+
+    CloseableIterable<FileScanTask> tasks = table.newScan().planFiles();
+    List<DataFile> dataFiles = Lists.newArrayList(CloseableIterable.transform(tasks, FileScanTask::file));
+    int total = (int) dataFiles.stream().mapToLong(ContentFile::recordCount).sum();
+
+    RowDelta rowDelta = table.newRowDelta();
+    // remove all data
+    GenericAppenderFactory appenderFactory = new GenericAppenderFactory(table.schema(), table.spec(),
+        null, null, null);
+    for (int i = 0; i < dataFiles.size(); i++) {
+      DataFile dataFile = dataFiles.get(i);
+      EncryptedOutputFile outputFile = EncryptedFiles.encryptedOutput(
+          table.io().newOutputFile(table.locationProvider().newDataLocation(UUID.randomUUID().toString())),
+          EncryptionKeyMetadata.EMPTY);
+      PositionDeleteWriter<Record> posDeleteWriter = appenderFactory.newPosDeleteWriter(
+          outputFile, FileFormat.PARQUET, dataFile.partition());
+      for (int j = 0; j < total; j++) {
+        posDeleteWriter.delete(dataFile.path(), j);
+      }
+      posDeleteWriter.close();
+      rowDelta.addDeletes(posDeleteWriter.toDeleteFile());
+    }
+
+    rowDelta.commit();
+    table.refresh();
+    List<Object[]> expectedRecords = currentData();
+    Result result = actions().rewriteDataFiles(table)
+        // do not include any file based on bin pack file size configs
+        .option(BinPackStrategy.MIN_FILE_SIZE_BYTES, "0")
+        .option(RewriteDataFiles.TARGET_FILE_SIZE_BYTES, Long.toString(Long.MAX_VALUE - 1))
+        .option(BinPackStrategy.MAX_FILE_SIZE_BYTES, Long.toString(Long.MAX_VALUE))
+        .option(BinPackStrategy.DELETE_FILE_THRESHOLD, "1")
+        .execute();
+    Assert.assertEquals("Action should rewrite 1 data files", 1, result.rewrittenDataFilesCount());
+
+    List<Object[]> actualRecords = currentData();
+    assertEquals("Rows must match", expectedRecords, actualRecords);
+    Assert.assertEquals("all rows are removed", 0, actualRecords.size());
+  }
+
+  @Test
   public void testBinPackWithStartingSequenceNumber() {
     Table table = createTablePartitioned(4, 2);
     shouldHaveFiles(table, 8);

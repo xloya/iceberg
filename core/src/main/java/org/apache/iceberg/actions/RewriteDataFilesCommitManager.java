@@ -20,6 +20,7 @@
 package org.apache.iceberg.actions;
 
 import java.io.Closeable;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -32,6 +33,7 @@ import org.apache.iceberg.RewriteFiles;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.exceptions.CommitStateUnknownException;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
+import org.apache.iceberg.relocated.com.google.common.collect.ImmutableSet;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.relocated.com.google.common.collect.Queues;
 import org.apache.iceberg.relocated.com.google.common.collect.Sets;
@@ -79,11 +81,26 @@ public class RewriteDataFilesCommitManager {
     }
 
     RewriteFiles rewrite = table.newRewrite().validateFromSnapshot(startingSnapshotId);
-    if (useStartingSequenceNumber) {
-      long sequenceNumber = table.snapshot(startingSnapshotId).sequenceNumber();
-      rewrite.rewriteFiles(rewrittenDataFiles, addedDataFiles, sequenceNumber);
+
+    if (addedDataFiles.size() > 0) {
+      if (useStartingSequenceNumber) {
+        rewrite.rewriteFiles(rewrittenDataFiles, addedDataFiles, table.snapshot(startingSnapshotId).sequenceNumber());
+      } else {
+        rewrite.rewriteFiles(rewrittenDataFiles, addedDataFiles);
+      }
     } else {
-      rewrite.rewriteFiles(rewrittenDataFiles, addedDataFiles);
+      // just expire no offset data files
+      Set<DataFile> noOffsetDataFiles = new HashSet<>();
+      rewrittenDataFiles.forEach(dataFile -> {
+        if (dataFile.splitOffsets() == null || dataFile.splitOffsets().size() == 0) {
+          noOffsetDataFiles.add(dataFile);
+        }
+      });
+      if (useStartingSequenceNumber) {
+        rewrite.rewriteFiles(noOffsetDataFiles, ImmutableSet.of(), table.snapshot(startingSnapshotId).sequenceNumber());
+      } else {
+        rewrite.rewriteFiles(noOffsetDataFiles, ImmutableSet.of(), ImmutableSet.of(), ImmutableSet.of());
+      }
     }
 
     rewrite.commit();
