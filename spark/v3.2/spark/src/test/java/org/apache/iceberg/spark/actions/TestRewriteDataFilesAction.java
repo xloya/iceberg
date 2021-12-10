@@ -62,6 +62,7 @@ import org.apache.iceberg.encryption.EncryptedFiles;
 import org.apache.iceberg.encryption.EncryptedOutputFile;
 import org.apache.iceberg.encryption.EncryptionKeyMetadata;
 import org.apache.iceberg.exceptions.CommitStateUnknownException;
+import org.apache.iceberg.exceptions.ValidationException;
 import org.apache.iceberg.expressions.Expressions;
 import org.apache.iceberg.hadoop.HadoopTables;
 import org.apache.iceberg.io.CloseableIterable;
@@ -260,8 +261,8 @@ public class TestRewriteDataFilesAction extends SparkTestBase {
     table.refresh();
 
     AssertHelpers.assertThrows("Expected an exception",
-        IllegalArgumentException.class,
-        "Files to delete cannot be null or empty",
+        ValidationException.class,
+        "No need add new data files, but all data files have group offsets, cannot expired",
         () -> actions().rewriteDataFiles(table)
             .option(BinPackStrategy.MIN_FILE_SIZE_BYTES, "0")
             .option(RewriteDataFiles.TARGET_FILE_SIZE_BYTES, Long.toString(Long.MAX_VALUE - 1))
