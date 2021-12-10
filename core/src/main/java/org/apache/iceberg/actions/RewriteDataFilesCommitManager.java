@@ -33,6 +33,7 @@ import org.apache.iceberg.DataFile;
 import org.apache.iceberg.RewriteFiles;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.exceptions.CommitStateUnknownException;
+import org.apache.iceberg.exceptions.ValidationException;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableSet;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
@@ -95,6 +96,11 @@ public class RewriteDataFilesCommitManager {
       noOffsetDataFiles.addAll(rewrittenDataFiles.stream()
           .filter(dataFile -> dataFile.splitOffsets() == null || dataFile.splitOffsets().size() <= 1)
           .collect(Collectors.toSet()));
+      if (noOffsetDataFiles.size() == 0) {
+        throw new ValidationException(
+            "No need add new data files, but all data files have group offsets, cannot expired, file group:{}", fileGroups);
+      }
+
       LOG.info("Expired no group offset data files:{}, rewritten data files:{}", noOffsetDataFiles, rewrittenDataFiles);
       if (rewrite instanceof BaseRewriteFiles) {
         ((BaseRewriteFiles) rewrite).setNeedExpiredDataFiles(true);
