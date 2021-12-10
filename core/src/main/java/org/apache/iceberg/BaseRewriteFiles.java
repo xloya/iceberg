@@ -114,7 +114,7 @@ public class BaseRewriteFiles extends MergingSnapshotProducer<RewriteFiles> impl
     }
   }
 
-  public void setNeedExpiredDataFiles(boolean needExpiredDataFiles) {
+  public void needExpiredDataFiles(boolean needExpiredDataFiles) {
     this.needExpiredDataFiles = needExpiredDataFiles;
   }
 }
