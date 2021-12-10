@@ -24,6 +24,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -159,7 +160,7 @@ public class TestRewriteDataFilesAction extends SparkTestBase {
 
   @Test
   public void testBinPackPartitionedTable() {
-    Table table = createTablePartitioned(4, 2);
+    Table table = createTablePartitioned(4, 2, new HashMap<>());
     shouldHaveFiles(table, 8);
     List<Object[]> expectedRecords = currentData();
 
@@ -175,7 +176,7 @@ public class TestRewriteDataFilesAction extends SparkTestBase {
 
   @Test
   public void testBinPackWithFilter() {
-    Table table = createTablePartitioned(4, 2);
+    Table table = createTablePartitioned(4, 2, new HashMap<>());
     shouldHaveFiles(table, 8);
     List<Object[]> expectedRecords = currentData();
 
@@ -194,9 +195,10 @@ public class TestRewriteDataFilesAction extends SparkTestBase {
   }
 
   @Test
-  public void testBinPackWithDeletes() throws Exception {
-    Table table = createTablePartitioned(4, 2);
-    table.updateProperties().set(TableProperties.FORMAT_VERSION, "2").commit();
+  public void testBinPackWithDeletes() {
+    Map<String, String> options = new HashMap<>();
+    options.put(TableProperties.FORMAT_VERSION, "2");
+    Table table = createTablePartitioned(4, 2, options);
     shouldHaveFiles(table, 8);
     table.refresh();
 
@@ -235,9 +237,13 @@ public class TestRewriteDataFilesAction extends SparkTestBase {
   }
 
   @Test
-  public void testBinPackWithDeleteAllData() throws Exception {
-    Table table = createTablePartitioned(1, 1);
-    table.updateProperties().set(TableProperties.FORMAT_VERSION, "2").commit();
+  public void testBinPackWithDeleteAllDataAndDataFileHasGroupOffsets() {
+    Map<String, String> options = new HashMap<>();
+    options.put(TableProperties.FORMAT_VERSION, "2");
+    options.put(TableProperties.PARQUET_ROW_GROUP_SIZE_BYTES, "1024");
+    options.put(TableProperties.PARQUET_PAGE_SIZE_BYTES, "256");
+    options.put(TableProperties.PARQUET_DICT_SIZE_BYTES, "512");
+    Table table = createTablePartitioned(1, 1, options);
     shouldHaveFiles(table, 1);
     table.refresh();
 
@@ -247,21 +253,40 @@ public class TestRewriteDataFilesAction extends SparkTestBase {
 
     RowDelta rowDelta = table.newRowDelta();
     // remove all data
-    GenericAppenderFactory appenderFactory = new GenericAppenderFactory(table.schema(), table.spec(),
-        null, null, null);
-    for (int i = 0; i < dataFiles.size(); i++) {
-      DataFile dataFile = dataFiles.get(i);
-      EncryptedOutputFile outputFile = EncryptedFiles.encryptedOutput(
-          table.io().newOutputFile(table.locationProvider().newDataLocation(UUID.randomUUID().toString())),
-          EncryptionKeyMetadata.EMPTY);
-      PositionDeleteWriter<Record> posDeleteWriter = appenderFactory.newPosDeleteWriter(
-          outputFile, FileFormat.PARQUET, dataFile.partition());
-      for (int j = 0; j < total; j++) {
-        posDeleteWriter.delete(dataFile.path(), j);
-      }
-      posDeleteWriter.close();
-      rowDelta.addDeletes(posDeleteWriter.toDeleteFile());
-    }
+    writePosDeletesToFile(table, dataFiles.get(0), total)
+        .forEach(rowDelta::addDeletes);
+
+    rowDelta.commit();
+    table.refresh();
+
+    AssertHelpers.assertThrows("Expected an exception",
+        IllegalArgumentException.class,
+        "Files to delete cannot be null or empty",
+        () -> actions().rewriteDataFiles(table)
+            .option(BinPackStrategy.MIN_FILE_SIZE_BYTES, "0")
+            .option(RewriteDataFiles.TARGET_FILE_SIZE_BYTES, Long.toString(Long.MAX_VALUE - 1))
+            .option(BinPackStrategy.MAX_FILE_SIZE_BYTES, Long.toString(Long.MAX_VALUE))
+            .option(BinPackStrategy.DELETE_FILE_THRESHOLD, "1")
+            .option(RewriteDataFiles.USE_STARTING_SEQUENCE_NUMBER, "false")
+            .execute());
+  }
+
+  @Test
+  public void testBinPackWithDeleteAllDataAndDataFileNoGroupOffsets() {
+    Map<String, String> options = new HashMap<>();
+    options.put(TableProperties.FORMAT_VERSION, "2");
+    Table table = createTablePartitioned(1, 1, options);
+    shouldHaveFiles(table, 1);
+    table.refresh();
+
+    CloseableIterable<FileScanTask> tasks = table.newScan().planFiles();
+    List<DataFile> dataFiles = Lists.newArrayList(CloseableIterable.transform(tasks, FileScanTask::file));
+    int total = (int) dataFiles.stream().mapToLong(ContentFile::recordCount).sum();
+
+    RowDelta rowDelta = table.newRowDelta();
+    // remove all data
+    writePosDeletesToFile(table, dataFiles.get(0), total)
+        .forEach(rowDelta::addDeletes);
 
     rowDelta.commit();
     table.refresh();
@@ -282,10 +307,11 @@ public class TestRewriteDataFilesAction extends SparkTestBase {
 
   @Test
   public void testBinPackWithStartingSequenceNumber() {
-    Table table = createTablePartitioned(4, 2);
+    Map<String, String> options = new HashMap<>();
+    options.put(TableProperties.FORMAT_VERSION, "2");
+    Table table = createTablePartitioned(4, 2, options);
     shouldHaveFiles(table, 8);
     List<Object[]> expectedRecords = currentData();
-    table.updateProperties().set(TableProperties.FORMAT_VERSION, "2").commit();
     table.refresh();
     long oldSequenceNumber = table.currentSnapshot().sequenceNumber();
 
@@ -313,7 +339,7 @@ public class TestRewriteDataFilesAction extends SparkTestBase {
 
   @Test
   public void testBinPackWithStartingSequenceNumberV1Compatibility() {
-    Table table = createTablePartitioned(4, 2);
+    Table table = createTablePartitioned(4, 2, new HashMap<>());
     shouldHaveFiles(table, 8);
     List<Object[]> expectedRecords = currentData();
     table.refresh();
@@ -1101,12 +1127,11 @@ public class TestRewriteDataFilesAction extends SparkTestBase {
     return table;
   }
 
-  protected Table createTablePartitioned(int partitions, int files) {
+  protected Table createTablePartitioned(int partitions, int files, Map<String, String> options) {
     PartitionSpec spec = PartitionSpec.builderFor(SCHEMA)
         .identity("c1")
         .truncate("c2", 2)
         .build();
-    Map<String, String> options = Maps.newHashMap();
     Table table = TABLES.create(SCHEMA, spec, options, tableLocation);
     Assert.assertNull("Table must be empty", table.currentSnapshot());
 

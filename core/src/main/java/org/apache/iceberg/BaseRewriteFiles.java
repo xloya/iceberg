@@ -58,7 +58,9 @@ class BaseRewriteFiles extends MergingSnapshotProducer<RewriteFiles> implements 
 
     Preconditions.checkArgument(filesToDelete > 0, "Files to delete cannot be null or empty");
 
-    if (deleteFilesToDelete.isEmpty()) {
+    if (deleteFilesToDelete.isEmpty() && dataFilesToDelete.isEmpty()) {
+      Preconditions.checkArgument(dataFilesToAdd.size() > 0,
+          "Data files to add can not be empty because there's no delete file to be rewritten");
       Preconditions.checkArgument(deleteFilesToAdd.isEmpty(),
           "Delete files to add must be empty because there's no delete file to be rewritten");
     }

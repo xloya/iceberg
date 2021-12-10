@@ -20,7 +20,6 @@
 package org.apache.iceberg.actions;
 
 import java.io.Closeable;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -28,6 +27,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.RewriteFiles;
 import org.apache.iceberg.Table;
@@ -89,13 +89,12 @@ public class RewriteDataFilesCommitManager {
         rewrite.rewriteFiles(rewrittenDataFiles, addedDataFiles);
       }
     } else {
-      // just expire no offset data files
-      Set<DataFile> noOffsetDataFiles = new HashSet<>();
-      rewrittenDataFiles.forEach(dataFile -> {
-        if (dataFile.splitOffsets() == null || dataFile.splitOffsets().size() == 0) {
-          noOffsetDataFiles.add(dataFile);
-        }
-      });
+      // just expire no group offset data files
+      Set<DataFile> noOffsetDataFiles = Sets.newHashSet();
+      noOffsetDataFiles.addAll(rewrittenDataFiles.stream()
+          .filter(dataFile -> dataFile.splitOffsets() == null || dataFile.splitOffsets().size() <= 1)
+          .collect(Collectors.toSet()));
+      LOG.info("no group offset data files:{}, rewritten data files:{}", noOffsetDataFiles, rewrittenDataFiles);
       if (useStartingSequenceNumber) {
         rewrite.rewriteFiles(noOffsetDataFiles, ImmutableSet.of(), table.snapshot(startingSnapshotId).sequenceNumber());
       } else {
