@@ -98,7 +98,8 @@ public class RewriteDataFilesCommitManager {
           .collect(Collectors.toSet()));
       if (noOffsetDataFiles.size() == 0) {
         throw new ValidationException(
-            "No need add new data files, but all data files have group offsets, cannot expired, file group:{}" + fileGroups);
+            "No need add new data files, but all data files have group offsets, cannot expired, file group:%s",
+            fileGroups);
       }
 
       LOG.info("Expired no group offset data files:{}, rewritten data files:{}", noOffsetDataFiles, rewrittenDataFiles);
