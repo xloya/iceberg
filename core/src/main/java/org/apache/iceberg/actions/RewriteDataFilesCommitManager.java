@@ -103,7 +103,7 @@ public class RewriteDataFilesCommitManager {
 
       LOG.info("Expired no group offset data files:{}, rewritten data files:{}", noOffsetDataFiles, rewrittenDataFiles);
       if (rewrite instanceof BaseRewriteFiles) {
-        ((BaseRewriteFiles) rewrite).needExpiredDataFiles(true);
+        ((BaseRewriteFiles) rewrite).needExpiredDataFiles();
       }
       if (useStartingSequenceNumber) {
         rewrite.rewriteFiles(noOffsetDataFiles, ImmutableSet.of(), table.snapshot(startingSnapshotId).sequenceNumber());
