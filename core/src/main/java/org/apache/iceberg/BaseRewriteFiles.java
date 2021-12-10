@@ -24,9 +24,10 @@ import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableSet;
 import org.apache.iceberg.relocated.com.google.common.collect.Sets;
 
-class BaseRewriteFiles extends MergingSnapshotProducer<RewriteFiles> implements RewriteFiles {
+public class BaseRewriteFiles extends MergingSnapshotProducer<RewriteFiles> implements RewriteFiles {
   private final Set<DataFile> replacedDataFiles = Sets.newHashSet();
   private Long startingSnapshotId = null;
+  private boolean needExpiredDataFiles = false;
 
   BaseRewriteFiles(String tableName, TableOperations ops) {
     super(tableName, ops);
@@ -58,9 +59,11 @@ class BaseRewriteFiles extends MergingSnapshotProducer<RewriteFiles> implements 
 
     Preconditions.checkArgument(filesToDelete > 0, "Files to delete cannot be null or empty");
 
-    if (deleteFilesToDelete.isEmpty() && dataFilesToDelete.isEmpty()) {
-      Preconditions.checkArgument(dataFilesToAdd.size() > 0,
-          "Data files to add can not be empty because there's no delete file to be rewritten");
+    if (deleteFilesToDelete.isEmpty()) {
+      if (!needExpiredDataFiles) {
+        Preconditions.checkArgument(dataFilesToAdd.size() > 0,
+            "Data files to add can not be empty because there's no delete file to be rewritten");
+      }
       Preconditions.checkArgument(deleteFilesToAdd.isEmpty(),
           "Delete files to add must be empty because there's no delete file to be rewritten");
     }
@@ -109,5 +112,9 @@ class BaseRewriteFiles extends MergingSnapshotProducer<RewriteFiles> implements 
       // if there are replaced data files, there cannot be any new row-level deletes for those data files
       validateNoNewDeletesForDataFiles(base, startingSnapshotId, replacedDataFiles);
     }
+  }
+
+  public void setNeedExpiredDataFiles(boolean needExpiredDataFiles) {
+    this.needExpiredDataFiles = needExpiredDataFiles;
   }
 }

@@ -28,6 +28,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
+import org.apache.iceberg.BaseRewriteFiles;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.RewriteFiles;
 import org.apache.iceberg.Table;
@@ -94,7 +95,10 @@ public class RewriteDataFilesCommitManager {
       noOffsetDataFiles.addAll(rewrittenDataFiles.stream()
           .filter(dataFile -> dataFile.splitOffsets() == null || dataFile.splitOffsets().size() <= 1)
           .collect(Collectors.toSet()));
-      LOG.info("no group offset data files:{}, rewritten data files:{}", noOffsetDataFiles, rewrittenDataFiles);
+      LOG.info("Expired no group offset data files:{}, rewritten data files:{}", noOffsetDataFiles, rewrittenDataFiles);
+      if (rewrite instanceof BaseRewriteFiles) {
+          ((BaseRewriteFiles) rewrite).setNeedExpiredDataFiles(true);
+      }
       if (useStartingSequenceNumber) {
         rewrite.rewriteFiles(noOffsetDataFiles, ImmutableSet.of(), table.snapshot(startingSnapshotId).sequenceNumber());
       } else {
