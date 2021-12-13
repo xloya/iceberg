@@ -91,17 +91,17 @@ public class RewriteDataFilesCommitManager {
         rewrite.rewriteFiles(rewrittenDataFiles, addedDataFiles);
       }
     } else {
-      // just expire no group offset data files
+      // just expire no split offsets data files
       Set<DataFile> noOffsetDataFiles = Sets.newHashSet();
       noOffsetDataFiles.addAll(rewrittenDataFiles.stream()
           .filter(dataFile -> dataFile.splitOffsets() == null || dataFile.splitOffsets().size() <= 1)
           .collect(Collectors.toSet()));
       if (noOffsetDataFiles.size() == 0) {
         throw new ValidationException(
-            "No need add new data files, but all data files have group offsets, cannot expired");
+            "No need add new data files, but all data files have split offsets, cannot expired");
       }
 
-      LOG.info("Expired no group offset data files:{}, rewritten data files:{}", noOffsetDataFiles, rewrittenDataFiles);
+      LOG.info("Expired no split offsets data files:{}, rewritten data files:{}", noOffsetDataFiles, rewrittenDataFiles);
       if (rewrite instanceof BaseRewriteFiles) {
         ((BaseRewriteFiles) rewrite).needExpiredDataFiles();
       }
