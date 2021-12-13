@@ -305,7 +305,7 @@ public class TestRewriteDataFilesAction extends SparkTestBase {
   }
 
   @Test
-  public void testBinPackPartialCommitWithDeleteAllDataAndDataFileHasGroupOffsetsWithSeqNum() {
+  public void testBinPackPartialCommitWithDeleteAllDataAndDataFileHasGroupOffsetsAndSeqNum() {
     Map<String, String> options = new HashMap<>();
     options.put(TableProperties.FORMAT_VERSION, "2");
     options.put(TableProperties.PARQUET_ROW_GROUP_SIZE_BYTES, "1024");
@@ -376,7 +376,7 @@ public class TestRewriteDataFilesAction extends SparkTestBase {
   }
 
   @Test
-  public void testBinPackWithDeleteAllDataAndDataFileNoGroupOffsetsWithStartingSeqNum() {
+  public void testBinPackWithDeleteAllDataAndDataFileNoGroupOffsetsAndSeqNum() {
     Map<String, String> options = new HashMap<>();
     options.put(TableProperties.FORMAT_VERSION, "2");
     Table table = createTablePartitioned(1, 1, options);
@@ -410,7 +410,7 @@ public class TestRewriteDataFilesAction extends SparkTestBase {
   }
 
   @Test
-  public void testBinPackPartialCommitWithDeleteAllDataAndDataFileNoGroupOffsetsWithStartingSeqNum() {
+  public void testBinPackPartialCommitWithDeleteAllDataAndDataFileNoGroupOffsetsAndSeqNum() {
     Map<String, String> options = new HashMap<>();
     options.put(TableProperties.FORMAT_VERSION, "2");
     Table table = createTablePartitioned(1, 1, options);
