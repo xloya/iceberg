@@ -62,7 +62,6 @@ import org.apache.iceberg.encryption.EncryptedFiles;
 import org.apache.iceberg.encryption.EncryptedOutputFile;
 import org.apache.iceberg.encryption.EncryptionKeyMetadata;
 import org.apache.iceberg.exceptions.CommitStateUnknownException;
-import org.apache.iceberg.exceptions.ValidationException;
 import org.apache.iceberg.expressions.Expressions;
 import org.apache.iceberg.hadoop.HadoopTables;
 import org.apache.iceberg.io.CloseableIterable;
@@ -261,8 +260,7 @@ public class TestRewriteDataFilesAction extends SparkTestBase {
     table.refresh();
 
     AssertHelpers.assertThrows("Expected an exception",
-        ValidationException.class,
-        "No need add new data files, but all data files have group offsets, cannot expired",
+        RuntimeException.class,
         () -> actions().rewriteDataFiles(table)
             .option(BinPackStrategy.MIN_FILE_SIZE_BYTES, "0")
             .option(RewriteDataFiles.TARGET_FILE_SIZE_BYTES, Long.toString(Long.MAX_VALUE - 1))
@@ -270,6 +268,77 @@ public class TestRewriteDataFilesAction extends SparkTestBase {
             .option(BinPackStrategy.DELETE_FILE_THRESHOLD, "1")
             .option(RewriteDataFiles.USE_STARTING_SEQUENCE_NUMBER, "false")
             .execute());
+  }
+
+  @Test
+  public void testBinPackWithDeleteAllDataAndDataFileHasGroupOffsetsWithSeqNum() {
+    Map<String, String> options = new HashMap<>();
+    options.put(TableProperties.FORMAT_VERSION, "2");
+    options.put(TableProperties.PARQUET_ROW_GROUP_SIZE_BYTES, "1024");
+    options.put(TableProperties.PARQUET_PAGE_SIZE_BYTES, "256");
+    options.put(TableProperties.PARQUET_DICT_SIZE_BYTES, "512");
+    Table table = createTablePartitioned(1, 1, options);
+    shouldHaveFiles(table, 1);
+    table.refresh();
+
+    CloseableIterable<FileScanTask> tasks = table.newScan().planFiles();
+    List<DataFile> dataFiles = Lists.newArrayList(CloseableIterable.transform(tasks, FileScanTask::file));
+    int total = (int) dataFiles.stream().mapToLong(ContentFile::recordCount).sum();
+
+    RowDelta rowDelta = table.newRowDelta();
+    // remove all data
+    writePosDeletesToFile(table, dataFiles.get(0), total)
+        .forEach(rowDelta::addDeletes);
+
+    rowDelta.commit();
+    table.refresh();
+
+    AssertHelpers.assertThrows("Expected an exception",
+        RuntimeException.class,
+        () -> actions().rewriteDataFiles(table)
+            .option(BinPackStrategy.MIN_FILE_SIZE_BYTES, "0")
+            .option(RewriteDataFiles.TARGET_FILE_SIZE_BYTES, Long.toString(Long.MAX_VALUE - 1))
+            .option(BinPackStrategy.MAX_FILE_SIZE_BYTES, Long.toString(Long.MAX_VALUE))
+            .option(BinPackStrategy.DELETE_FILE_THRESHOLD, "1")
+            .option(RewriteDataFiles.USE_STARTING_SEQUENCE_NUMBER, "true")
+            .execute());
+  }
+
+  @Test
+  public void testBinPackPartialCommitWithDeleteAllDataAndDataFileHasGroupOffsetsWithSeqNum() {
+    Map<String, String> options = new HashMap<>();
+    options.put(TableProperties.FORMAT_VERSION, "2");
+    options.put(TableProperties.PARQUET_ROW_GROUP_SIZE_BYTES, "1024");
+    options.put(TableProperties.PARQUET_PAGE_SIZE_BYTES, "256");
+    options.put(TableProperties.PARQUET_DICT_SIZE_BYTES, "512");
+    Table table = createTablePartitioned(1, 1, options);
+    shouldHaveFiles(table, 1);
+    table.refresh();
+
+    CloseableIterable<FileScanTask> tasks = table.newScan().planFiles();
+    List<DataFile> dataFiles = Lists.newArrayList(CloseableIterable.transform(tasks, FileScanTask::file));
+    int total = (int) dataFiles.stream().mapToLong(ContentFile::recordCount).sum();
+
+    RowDelta rowDelta = table.newRowDelta();
+    // remove all data
+    writePosDeletesToFile(table, dataFiles.get(0), total)
+        .forEach(rowDelta::addDeletes);
+
+    rowDelta.commit();
+    table.refresh();
+    List<Object[]> expectedRecords = currentData();
+    Result result = actions().rewriteDataFiles(table)
+            .option(BinPackStrategy.MIN_FILE_SIZE_BYTES, "0")
+            .option(RewriteDataFiles.TARGET_FILE_SIZE_BYTES, Long.toString(Long.MAX_VALUE - 1))
+            .option(BinPackStrategy.MAX_FILE_SIZE_BYTES, Long.toString(Long.MAX_VALUE))
+            .option(BinPackStrategy.DELETE_FILE_THRESHOLD, "1")
+            .option(RewriteDataFiles.USE_STARTING_SEQUENCE_NUMBER, "true")
+            .option(RewriteDataFiles.PARTIAL_PROGRESS_ENABLED, "true")
+            .execute();
+    Assert.assertEquals("Action should rewrite 0 data files", 0, result.rewrittenDataFilesCount());
+
+    List<Object[]> actualRecords = currentData();
+    assertEquals("Rows must match", expectedRecords, actualRecords);
   }
 
   @Test
@@ -298,12 +367,80 @@ public class TestRewriteDataFilesAction extends SparkTestBase {
         .option(RewriteDataFiles.TARGET_FILE_SIZE_BYTES, Long.toString(Long.MAX_VALUE - 1))
         .option(BinPackStrategy.MAX_FILE_SIZE_BYTES, Long.toString(Long.MAX_VALUE))
         .option(BinPackStrategy.DELETE_FILE_THRESHOLD, "1")
+        .option(RewriteDataFiles.USE_STARTING_SEQUENCE_NUMBER, "false")
         .execute();
     Assert.assertEquals("Action should rewrite 1 data files", 1, result.rewrittenDataFilesCount());
 
     List<Object[]> actualRecords = currentData();
     assertEquals("Rows must match", expectedRecords, actualRecords);
-    Assert.assertEquals("all rows are removed", 0, actualRecords.size());
+  }
+
+  @Test
+  public void testBinPackWithDeleteAllDataAndDataFileNoGroupOffsetsWithStartingSeqNum() {
+    Map<String, String> options = new HashMap<>();
+    options.put(TableProperties.FORMAT_VERSION, "2");
+    Table table = createTablePartitioned(1, 1, options);
+    shouldHaveFiles(table, 1);
+    table.refresh();
+
+    CloseableIterable<FileScanTask> tasks = table.newScan().planFiles();
+    List<DataFile> dataFiles = Lists.newArrayList(CloseableIterable.transform(tasks, FileScanTask::file));
+    int total = (int) dataFiles.stream().mapToLong(ContentFile::recordCount).sum();
+
+    RowDelta rowDelta = table.newRowDelta();
+    // remove all data
+    writePosDeletesToFile(table, dataFiles.get(0), total)
+        .forEach(rowDelta::addDeletes);
+
+    rowDelta.commit();
+    table.refresh();
+    List<Object[]> expectedRecords = currentData();
+    Result result = actions().rewriteDataFiles(table)
+        // do not include any file based on bin pack file size configs
+        .option(BinPackStrategy.MIN_FILE_SIZE_BYTES, "0")
+        .option(RewriteDataFiles.TARGET_FILE_SIZE_BYTES, Long.toString(Long.MAX_VALUE - 1))
+        .option(BinPackStrategy.MAX_FILE_SIZE_BYTES, Long.toString(Long.MAX_VALUE))
+        .option(BinPackStrategy.DELETE_FILE_THRESHOLD, "1")
+        .option(RewriteDataFiles.USE_STARTING_SEQUENCE_NUMBER, "true")
+        .execute();
+    Assert.assertEquals("Action should rewrite 1 data files", 1, result.rewrittenDataFilesCount());
+
+    List<Object[]> actualRecords = currentData();
+    assertEquals("Rows must match", expectedRecords, actualRecords);
+  }
+
+  @Test
+  public void testBinPackPartialCommitWithDeleteAllDataAndDataFileNoGroupOffsetsWithStartingSeqNum() {
+    Map<String, String> options = new HashMap<>();
+    options.put(TableProperties.FORMAT_VERSION, "2");
+    Table table = createTablePartitioned(1, 1, options);
+    shouldHaveFiles(table, 1);
+    table.refresh();
+
+    CloseableIterable<FileScanTask> tasks = table.newScan().planFiles();
+    List<DataFile> dataFiles = Lists.newArrayList(CloseableIterable.transform(tasks, FileScanTask::file));
+    int total = (int) dataFiles.stream().mapToLong(ContentFile::recordCount).sum();
+
+    RowDelta rowDelta = table.newRowDelta();
+    // remove all data
+    writePosDeletesToFile(table, dataFiles.get(0), total)
+        .forEach(rowDelta::addDeletes);
+
+    rowDelta.commit();
+    table.refresh();
+    List<Object[]> expectedRecords = currentData();
+    Result result = actions().rewriteDataFiles(table)
+        // do not include any file based on bin pack file size configs
+        .option(BinPackStrategy.MIN_FILE_SIZE_BYTES, "0")
+        .option(RewriteDataFiles.TARGET_FILE_SIZE_BYTES, Long.toString(Long.MAX_VALUE - 1))
+        .option(BinPackStrategy.MAX_FILE_SIZE_BYTES, Long.toString(Long.MAX_VALUE))
+        .option(BinPackStrategy.DELETE_FILE_THRESHOLD, "1")
+        .option(RewriteDataFiles.USE_STARTING_SEQUENCE_NUMBER, "true")
+        .execute();
+    Assert.assertEquals("Action should rewrite 1 data files", 1, result.rewrittenDataFilesCount());
+
+    List<Object[]> actualRecords = currentData();
+    assertEquals("Rows must match", expectedRecords, actualRecords);
   }
 
   @Test
