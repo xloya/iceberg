@@ -257,8 +257,11 @@ public class TestRewriteDataFilesAction extends SparkTestBase {
     table.refresh();
     List<Object[]> expectedRecords = currentData();
     Result result = actions().rewriteDataFiles(table)
-            .option(BinPackStrategy.DELETE_FILE_THRESHOLD, "1")
-            .execute();
+        .option(BinPackStrategy.MIN_FILE_SIZE_BYTES, "0")
+        .option(RewriteDataFiles.TARGET_FILE_SIZE_BYTES, Long.toString(Long.MAX_VALUE - 1))
+        .option(BinPackStrategy.MAX_FILE_SIZE_BYTES, Long.toString(Long.MAX_VALUE))
+        .option(BinPackStrategy.DELETE_FILE_THRESHOLD, "1")
+        .execute();
     Assert.assertEquals("Action should rewrite 1 data files", 1, result.rewrittenDataFilesCount());
 
     List<Object[]> actualRecords = currentData();
